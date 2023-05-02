@@ -1,5 +1,7 @@
-import aiohttp
 import asyncio
+import platform
+
+import aiohttp
 
 
 async def fetch(session, url):
@@ -10,8 +12,13 @@ async def fetch(session, url):
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        html = await fetch(session, 'http://example.com')
+        html = await fetch(session, 'https://inosmi.ru/20211116/250914886.html')
         print(html)
 
 
-asyncio.run(main())
+if __name__ == '__main__':
+    if platform.system() == 'Windows':
+        # Без этого возникает RuntimeError после окончания работы
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio.run(main())
