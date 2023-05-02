@@ -3,6 +3,8 @@ import platform
 
 import aiohttp
 
+import adapters
+
 
 async def fetch(session, url):
     async with session.get(url) as response:
@@ -13,7 +15,8 @@ async def fetch(session, url):
 async def main():
     async with aiohttp.ClientSession() as session:
         html = await fetch(session, 'https://inosmi.ru/20211116/250914886.html')
-        print(html)
+        clean_text = adapters.SANITIZERS['inosmi_ru'](html, plaintext=True)
+        print(clean_text)
 
 
 if __name__ == '__main__':
