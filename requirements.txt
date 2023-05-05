@@ -7,3 +7,4 @@ pytest==5.4.3
 pymorphy2==0.8
 pymorphy2-dicts==2.4.393442.3710985
 DAWG-Python==0.7.2
+anyio==3.6.2
