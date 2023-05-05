@@ -1,11 +1,26 @@
 import asyncio
 import platform
+from pathlib import Path
 
 import aiohttp
 import pymorphy2
 
 import adapters
+from exceptions import DirectoryNotFound
 from text_tools import calculate_jaundice_rate, split_by_words
+
+
+def read_charged_words():
+    charged_words_dirpath = Path().resolve() / 'data' / 'charged_dict'
+    try:
+        charged_words = []
+        for charged_words_filepath in charged_words_dirpath.iterdir():
+            if charged_words_filepath.is_file():
+                with open(charged_words_filepath, 'r', encoding='utf-8') as charged_words_file:
+                    charged_words.extend(charged_words_file.read().split())
+        return charged_words
+    except FileNotFoundError as ex:
+        raise DirectoryNotFound(f'Не найдена папка с "заряженными" словами {charged_words_dirpath}')
 
 
 async def fetch(session, url):
@@ -16,7 +31,7 @@ async def fetch(session, url):
 
 async def main():
     morph = pymorphy2.MorphAnalyzer()
-    charged_words = ['чрезвычайно', 'фантастический']
+    charged_words = read_charged_words()
 
     async with aiohttp.ClientSession() as session:
         html = await fetch(session, 'https://inosmi.ru/20211116/250914886.html')
