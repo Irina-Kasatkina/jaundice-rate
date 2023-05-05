@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aiohttp
 import pymorphy2
+from aiohttp import ClientResponseError
 from anyio import sleep, create_task_group
 
 import adapters
@@ -12,6 +13,7 @@ from text_tools import calculate_jaundice_rate, split_by_words
 
 
 TEST_ARTICLES = [
+    'https://inosmi.ru/not/exist.html',
     'https://inosmi.ru/20211116/250914886.html',
     'https://inosmi.ru/20230504/ukraina-262710611.html',
     'https://inosmi.ru/20230504/nato-262692864.html',
@@ -40,12 +42,19 @@ async def fetch(session, url):
 
 
 async def process_article(session, morph, charged_words, url, results):
-    html = await fetch(session, url)
-    clean_text = adapters.SANITIZERS['inosmi_ru'](html, plaintext=True)
-    article_words = split_by_words(morph, clean_text)
     result = {'URL:': url}
-    result['Рейтинг:'] = calculate_jaundice_rate(article_words, charged_words)
-    result['Слов в статье:'] = len(article_words)
+    try:
+        html = await fetch(session, url)
+        clean_text = adapters.SANITIZERS['inosmi_ru'](html, plaintext=True)
+        article_words = split_by_words(morph, clean_text)
+        result['Статус:'] = 'OK'
+        result['Рейтинг:'] = calculate_jaundice_rate(article_words, charged_words)
+        result['Слов в статье:'] = len(article_words)
+    except ClientResponseError:
+        result['Статус:'] = 'FETCH_ERROR'
+        result['Рейтинг:'] = 'None'
+        result['Слов в статье:'] = 'None'
+
     results.append(result)
 
 
