@@ -39,27 +39,30 @@ async def fetch(session, url):
         return await response.text()
 
 
-async def process_article(session, morph, charged_words, url):
+async def process_article(session, morph, charged_words, url, results):
     html = await fetch(session, url)
     clean_text = adapters.SANITIZERS['inosmi_ru'](html, plaintext=True)
     article_words = split_by_words(morph, clean_text)
-    score = calculate_jaundice_rate(article_words, charged_words)
-    words_count = len(article_words)
-
-    print()
-    print('URL:', url)
-    print('Рейтинг:', score)
-    print('Слов в статье:', words_count)
+    result = {'URL:': url}
+    result['Рейтинг:'] = calculate_jaundice_rate(article_words, charged_words)
+    result['Слов в статье:'] = len(article_words)
+    results.append(result)
 
 
 async def main():
     morph = pymorphy2.MorphAnalyzer()
     charged_words = read_charged_words()
+    results = []
 
     async with aiohttp.ClientSession() as session:
         async with create_task_group() as task_group:
             for url in TEST_ARTICLES:
-                task_group.start_soon(process_article, session, morph, charged_words, url)
+                task_group.start_soon(process_article, session, morph, charged_words, url, results)
+
+    for result in results:
+        print()
+        for key, value in result.items():
+            print(key, value)
 
 
 if __name__ == '__main__':
