@@ -6,6 +6,7 @@ from pathlib import Path
 import pymorphy2
 from aiohttp import ClientResponseError, ClientSession
 from anyio import sleep, create_task_group
+from async_timeout import timeout
 
 from adapters import ArticleNotFound, SANITIZERS
 from exceptions import DirectoryNotFound
@@ -26,6 +27,7 @@ class ProcessingStatus(Enum):
     OK = 'OK'
     FETCH_ERROR = 'FETCH_ERROR'
     PARSING_ERROR = 'PARSING_ERROR'
+    TIMEOUT = 'TIMEOUT'
 
 
 def read_charged_words():
@@ -42,9 +44,10 @@ def read_charged_words():
 
 
 async def fetch(session, url):
-    async with session.get(url) as response:
-        response.raise_for_status()
-        return await response.text()
+    async with timeout(0.0001):
+        async with session.get(url) as response:
+            response.raise_for_status()
+            return await response.text()
 
 
 async def process_article(session, morph, charged_words, url, results):
@@ -62,6 +65,10 @@ async def process_article(session, morph, charged_words, url, results):
         result['Слов в статье:'] = 'None'
     except ArticleNotFound:
         result['Статус:'] = ProcessingStatus.PARSING_ERROR.value
+        result['Рейтинг:'] = 'None'
+        result['Слов в статье:'] = 'None'
+    except asyncio.exceptions.TimeoutError:
+        result['Статус:'] = ProcessingStatus.TIMEOUT.value
         result['Рейтинг:'] = 'None'
         result['Слов в статье:'] = 'None'
 
