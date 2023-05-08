@@ -1,15 +1,12 @@
 import asyncio
-import contextlib
 import logging
 import platform
-import time
 from enum import Enum
 from pathlib import Path
 
 import pymorphy2
 from aiohttp import ClientResponseError, ClientSession
 from anyio import sleep, create_task_group
-from async_timeout import timeout
 
 from adapters import ArticleNotFound, SANITIZERS
 from exceptions import DirectoryNotFound
@@ -34,14 +31,10 @@ class ProcessingStatus(Enum):
     PARSING_ERROR = 'PARSING_ERROR'
     TIMEOUT = 'TIMEOUT'
 
-@contextlib.contextmanager
-def log_execution_time():
-    start_time = time.monotonic()
-    try:
-        yield
-    finally:
-        execution_time = time.monotonic() - start_time
-        logging.info(f'Анализ закончен за {execution_time:.2f} сек')
+
+def read_time_from_log():
+    with open(LOG_FILENAME, 'r') as log_file:
+        return f'{log_file.read().split()[-2]} сек'
 
 
 def read_charged_words():
@@ -72,20 +65,20 @@ async def process_article(session, morph, charged_words, url, results):
         else:
             clean_text = SANITIZERS['inosmi_ru'](html, plaintext=True)
 
-        with log_execution_time():
-            article_words = split_by_words(morph, clean_text)
-
+        article_words = await split_by_words(morph, clean_text)
         result['Статус:'] = ProcessingStatus.OK.value
         result['Рейтинг:'] = calculate_jaundice_rate(article_words, charged_words)
         result['Слов в статье:'] = len(article_words)
-        with open(LOG_FILENAME, 'r') as log_file:
-           result['INFO:root:Анализ закончен за'] = f'{log_file.read().split()[-2]} сек'
+        result['INFO:root:Анализ закончен за'] = read_time_from_log()
     except ClientResponseError:
         result['Статус:'] = ProcessingStatus.FETCH_ERROR.value
     except ArticleNotFound:
         result['Статус:'] = ProcessingStatus.PARSING_ERROR.value
     except asyncio.TimeoutError:
         result['Статус:'] = ProcessingStatus.TIMEOUT.value
+    except TimeoutError:
+        result['Статус:'] = ProcessingStatus.TIMEOUT.value
+        result['INFO:root:Анализ закончен за'] = read_time_from_log()
 
     results.append(result)
 
