@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import time
 
 import pymorphy2
@@ -30,13 +29,10 @@ async def split_by_words(morph, text, timeout=3.0):
         if not index % 2000:
             execution_time += time.monotonic() - start_time
             if execution_time > timeout:
-                logging.info(f'Анализ закончен за {execution_time:.2f} сек')
                 raise TimeoutError
             await asyncio.sleep(0)
             start_time = time.monotonic()
 
-    execution_time += time.monotonic() - start_time
-    logging.info(f'Анализ закончен за {execution_time:.2f} сек')
     return words
 
 
