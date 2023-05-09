@@ -1,20 +1,18 @@
 import asyncio
-import platform
+import contextlib
 from enum import Enum
 from pathlib import Path
 
 import pymorphy2
+import pytest
 from aiohttp import ClientResponseError, ClientSession, InvalidURL
 from anyio import sleep, create_task_group
 
 from adapters import ArticleNotFound, SANITIZERS
-from exceptions import DirectoryNotFound
 from text_tools import calculate_jaundice_rate, split_by_words
 
 
-LOG_FILENAME = 'log.txt'
-
-charged_words = None
+charged_words = []
 morph = None
 
 
@@ -26,17 +24,16 @@ class ProcessingStatus(Enum):
     INVALID_URL = 'INVALID_URL'
 
 
-def read_charged_words():
-    charged_words_dirpath = Path().resolve() / 'data' / 'charged_dict'
-    try:
+def fill_charged_words():
+    global charged_words
+    if not charged_words:
         charged_words = []
-        for charged_words_filepath in charged_words_dirpath.iterdir():
-            if charged_words_filepath.is_file():
-                with open(charged_words_filepath, 'r', encoding='utf-8') as charged_words_file:
-                    charged_words.extend(charged_words_file.read().split())
-        return charged_words
-    except FileNotFoundError as ex:
-        raise DirectoryNotFound(f'Не найдена папка с "заряженными" словами {charged_words_dirpath}')
+        with contextlib.suppress(FileNotFoundError):
+            charged_words_dirpath = Path().resolve() / 'data' / 'charged_dict'
+            for charged_words_filepath in charged_words_dirpath.iterdir():
+                if charged_words_filepath.is_file():
+                    with open(charged_words_filepath, 'r', encoding='utf-8') as charged_words_file:
+                        charged_words.extend(charged_words_file.read().split())
 
 
 async def fetch(session, url):
@@ -46,6 +43,7 @@ async def fetch(session, url):
 
 
 async def process_article(session, url, results):
+    global charged_words
     result = {'status': None, 'url': url, 'score': None, 'words_count': None}
     try:
         html = await fetch(session, url)
@@ -62,9 +60,7 @@ async def process_article(session, url, results):
         result['status'] = ProcessingStatus.FETCH_ERROR.value
     except ArticleNotFound:
         result['status'] = ProcessingStatus.PARSING_ERROR.value
-    except asyncio.TimeoutError:
-        result['status'] = ProcessingStatus.TIMEOUT.value
-    except TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         result['status'] = ProcessingStatus.TIMEOUT.value
     results.append(result)
 
@@ -74,9 +70,7 @@ async def process_articles(articles_urls):
     if not morph:
         morph = pymorphy2.MorphAnalyzer()
 
-    global charged_words
-    if not charged_words:
-        charged_words = read_charged_words()
+    fill_charged_words()
 
     results = []
     async with ClientSession() as session:
@@ -86,25 +80,72 @@ async def process_articles(articles_urls):
     return results
 
 
-if __name__ == '__main__':
-    if platform.system() == 'Windows':
-        # Без этого возникает RuntimeError после окончания работы main()
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+@pytest.fixture
+def event_loop():
+    """Create an instance of the default event loop for each test case."""
+    # from https://github.com/pytest-dev/pytest-asyncio/issues/371
+    policy = asyncio.WindowsSelectorEventLoopPolicy()
+    res = policy.new_event_loop()
+    asyncio.set_event_loop(res)
+    res._close = res.close
+    res.close = lambda: None
+    yield res
+    res._close()
 
-    test_articles_urls = [
-        'https://dvmn.org/media/filer_public/51/83/'
-        '51830f54-7ec7-4702-847b-c5790ed3724c/gogol_nikolay_taras_bulba_-_bookscafenet.txt',
-        'https://lenta.ru/brief/2021/08/26/afg_terror/',
-        'https://inosmi.ru/not/exist.html',
-        'https://inosmi.ru/20211116/250914886.html',
-        'https://inosmi.ru/20230504/ukraina-262710611.html',
-        'https://inosmi.ru/20230504/nato-262692864.html',
-        'https://inosmi.ru/20230505/konflikt-262704497.html',
-        'https://inosmi.ru/20230505/ukraina-262724526.html',
-    ]
 
-    results = asyncio.run(process_articles(test_articles_urls))
-    for result in results:
-        print()
-        for key, value in result.items():
-            print(f'{key}: {value}') 
+@pytest.mark.asyncio
+async def test_process_article():
+    global morph
+    if not morph:
+        morph = pymorphy2.MorphAnalyzer()
+
+    fill_charged_words()
+
+    async with ClientSession() as session:
+        # OK
+        results = []
+        url = 'https://inosmi.ru/20211116/250914886.html'
+        await process_article(session, url, results)
+        assert len(results) == 1
+        result = results[0]
+        assert result['status'] == ProcessingStatus.OK.value
+        assert result['url'] == url
+        assert result['score'] >= 0
+        assert result['score'] <= 100
+        assert result['words_count'] > 0
+
+        # Ошибка скачивания статьи
+        results = []
+        url = 'https://inosmi.ru/not/exist.html'
+        await process_article(session, url, results)
+        assert len(results) == 1
+        result = results[0]
+        assert result['status'] == ProcessingStatus.FETCH_ERROR.value
+        assert result['url'] == url
+        assert result['score'] is None
+        assert result['words_count'] is None
+
+        # Ошибка парсинга статьи
+        results = []
+        url = 'https://lenta.ru/brief/2021/08/26/afg_terror/'
+        await process_article(session, url, results)
+        assert len(results) == 1
+        result = results[0]
+        assert result['status'] == ProcessingStatus.PARSING_ERROR.value
+        assert result['url'] == url
+        assert result['score'] is None
+        assert result['words_count'] is None
+
+        # Ошибка Timeout
+        results = []
+        url = (
+            'https://dvmn.org/media/filer_public/51/83/51830f54-7ec7-4702-847b'
+            '-c5790ed3724c/gogol_nikolay_taras_bulba_-_bookscafenet.txt'
+        )
+        await process_article(session, url, results)
+        assert len(results) == 1
+        result = results[0]
+        assert result['status'] == ProcessingStatus.TIMEOUT.value
+        assert result['url'] == url
+        assert result['score'] is None
+        assert result['words_count'] is None

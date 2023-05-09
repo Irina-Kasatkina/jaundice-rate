@@ -50,10 +50,8 @@ http://127.0.0.1:8080/?urls=http://example.com,https://inosmi.ru/politic/2019062
 
 ```
 python -m pytest adapters/inosmi_ru.py
-```
-
-```
 python -m pytest text_tools.py
+python -m pytest articles_processor.py
 ```
 
 ## Цели проекта
